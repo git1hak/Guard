@@ -253,7 +253,9 @@ vgui_color:depend({okoshko, "Misc & Visuals"}, {mva_select, 2})
 local slow_ind = groups.angles:checkbox("\v • \rSlow-down Indicator", {161, 92, 191})
 slow_ind:depend({okoshko, "Misc & Visuals"}, {mva_select, 2})
 local viewmodel = groups.angles:checkbox("\v • \rCustom viewmodels (xyz)")
-viewmodel:depend({okoshko, "Misc & Visuals"}, {mva_select, 2})
+viewmodel:depend({okoshko, "Misc & Visuals"}, {mva_select, 999})
+local fov = groups.angles:slider("Fov", -350, 350, 0, true, 'f', 0.01)
+fov:depend({okoshko, "Misc & Visuals"}, {mva_select, 2}):depend(viewmodel)
 local view_x = groups.angles:slider("X", -15000, 15000, 0, true, 'X', 0.01)
 view_x:depend({okoshko, "Misc & Visuals"}, {mva_select, 2}):depend(viewmodel)
 local view_y = groups.angles:slider("Y", -15000, 15000, 0, true, 'Y', 0.01)
@@ -944,7 +946,6 @@ local set_angles_fn = ffi.cast(ffi_to.set_angles, set_angles) or error('Couldn\'
 
 local get_original = function()
     return {
-        view_fov2 = get_cvar('viewmodel_fov'),
         view_x2 = get_cvar('viewmodel_offset_x'),
         view_y2 = get_cvar('viewmodel_offset_y'),
         view_z2 = get_cvar('viewmodel_offset_z')

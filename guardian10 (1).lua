@@ -439,11 +439,14 @@ line_prob:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {sele
 ctx.delay_ticked = groups.angles:slider("\n", 1, 4, 1, true, "t")
 ctx.delay_ticked:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, ctx.enable, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode_tickes, 2})
 
-ctx.delay_time_modes = groups.angles:slider("\n", 10, 250, 10, true, "ms")
+ctx.delay_time_modes = groups.angles:slider("\n", 10, 1500, 10, true, "ms")
 ctx.delay_time_modes:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, ctx.enable, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode_tickes, 3})
 
-ctx.delay_angle_modes = groups.angles:slider("\n", 1, 24, 1, true, "t",1, {"Off"})
-ctx.delay_angle_modes:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, ctx.enable, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode_tickes, 4})
+ctx.delay_angle_modes1 = groups.angles:slider("\n", 1, 24, 1, true, "t",1, {"Off"})
+ctx.delay_angle_modes1:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, ctx.enable, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode_tickes, 4})
+
+ctx.delay_angle_modes2 = groups.angles:slider("\n", 1, 24, 1, true, "t",1, {"Off"})
+ctx.delay_angle_modes2:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, ctx.enable, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode_tickes, 4})
 
 ctx.combo1 = groups.angles:combobox("\n", {"Off", "Center", "Offset", "Random", "Skitter"})
 ctx.combo1:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\aFFFF00331 - Way"})
@@ -530,6 +533,10 @@ end
 
 local sended = 0
 local switch = false
+local last_time_switch = 0
+local sended_left  = 0
+local sended_right = 0
+local use_left = true
 
 local function warmup_antiaim()
    gamerulesproxy = entity.get_all('CCSGameRulesProxy')[1]
@@ -547,10 +554,10 @@ local function warmup_antiaim()
 end
 
 local function builder_aa(cmd)
-     state = get_local_state()
-     me = entity.get_local_player()
-     gamerulesproxy = entity.get_all('CCSGameRulesProxy')[1]
-     warmup = entity.get_prop(gamerulesproxy,'m_bWarmupPeriod')
+    state = get_local_state()
+    me = entity.get_local_player()
+    gamerulesproxy = entity.get_all('CCSGameRulesProxy')[1]
+    warmup = entity.get_prop(gamerulesproxy,'m_bWarmupPeriod')
 
     local ctx = builder[builder[state].enable:get() and state or "Shared"]
 
@@ -564,8 +571,9 @@ local function builder_aa(cmd)
     refs.aa.angles.base:override("At targets")
     refs.aa.angles.enable:override(true)
 
-    jit_value = ctx.modes_jitter_slid:get()
+    jit_value  = ctx.modes_jitter_slid:get()
     jit_value2 = ctx.modes_jitter_slid2:get()
+
     current_delay = ctx.delay_time:get()
     mode = ctx.delay_mode:get()
 
@@ -575,28 +583,70 @@ local function builder_aa(cmd)
         current_delay = math.random(min_delay, max_delay + min_delay)
     end
 
+    local delay_mode_tickes = ctx.delay_mode_tickes:get()
+
     if globals.chokedcommands() == 0 then
-        sended = sended + 1
-        if sended % current_delay == 0 then
-            switch = not switch
+        if delay_mode_tickes == 4 then
+            local delay_l = ctx.delay_angle_modes1:get()
+            local delay_r = ctx.delay_angle_modes2:get()
+            if delay_l <= 1 then delay_l = current_delay end
+            if delay_r <= 1 then delay_r = current_delay end
+
+            if use_left then
+                sended_left = sended_left + 1
+                if sended_left % delay_l == 0 then
+                    use_left = false
+                    sended_left = 0
+                end
+            else
+                sended_right = sended_right + 1
+                if sended_right % delay_r == 0 then
+                    use_left = true
+                    sended_right = 0
+                end
+            end
+        else
+            sended = sended + 1
+            if sended % current_delay == 0 then
+                if delay_mode_tickes == 3 then
+                    local time_ms  = ctx.delay_time_modes:get()
+                    local time_sec = time_ms / 1000
+                    local now = globals.curtime()
+                    if now - last_time_switch >= time_sec then
+                        switch = not switch
+                        last_time_switch = now
+                    end
+                else
+                    switch = not switch
+                end
+            end
         end
     end
 
-    left_value = ctx.left_angle:get()
-    right_value = ctx.right_angle:get()
-    random_left_pct = ctx.random_left:get()
+    left_value       = ctx.left_angle:get()
+    right_value      = ctx.right_angle:get()
+    random_left_pct  = ctx.random_left:get()
     random_right_pct = ctx.random_right:get()
 
-    main_offset = switch and randomized_left or randomized_right
-    left_variation = left_value * (random_left_pct / 100)
+    left_variation  = left_value  * (random_left_pct  / 100)
     right_variation = right_value * (random_right_pct / 100)
-    randomized_left = left_value + math.random(-left_variation, left_variation)
+    randomized_left  = left_value  + math.random(-left_variation,  left_variation)
     randomized_right = right_value + math.random(-right_variation, right_variation)
 
-   refs.aa.angles.yaw[2]:override(main_offset)
-   refs.aa.angles.body[1]:override("Static")
-   refs.aa.angles.body[2]:override(switch and 120 or -120)
+    local main_offset
+
+    if delay_mode_tickes == 4 then
+        main_offset = use_left and randomized_left or randomized_right
+    else
+        main_offset = switch and randomized_left or randomized_right
+    end
+
+    refs.aa.angles.yaw[2]:override(main_offset)
+    refs.aa.angles.body[1]:override("Static")
+    refs.aa.angles.body[2]:override((delay_mode_tickes == 4 and use_left) and 120 or -120)
 end
+
+
 
 local function cust_random()
     state = get_local_state()

@@ -554,7 +554,8 @@ local function builder_aa(cmd)
 
     local ctx = builder[builder[state].enable:get() and state or "Shared"]
 
-    if warmups:get("Warmup") and shizo_aa:get() and not ctx.enable:get() then return end
+    if warmups:get("Warmup") and shizo_aa:get() then return end
+    if not ctx.enable:get() then return end
 
     refs.aa.angles.pitch[1]:override("Custom")
     refs.aa.angles.pitch[2]:override(89)

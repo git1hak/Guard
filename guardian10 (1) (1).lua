@@ -110,91 +110,11 @@ end
 
 local notifications = {}
 
-local stack_spacing = 5   
-local anim_speed = 6      
-local duration = 4.0      
-local slide_distance = 50  
-local FONT_FLAG = ""       
-local padding_x = 8        
-local padding_y = 4
-
-local function push_notification(format_string, ...)
-    local formatted_text
-    
-    if select('#', ...) > 0 then
-        formatted_text = string.format(format_string, ...)
-    else
-        formatted_text = format_string
-    end
-
-    local new_log = {
-        text = formatted_text,
-        active_until = globals.realtime() + duration,
-        progress = 0.0,
-    }
-
-    table.insert(notifications, 1, new_log)
-end
-
 local function clamp(val, min, max)
     if val < min then return min end
     if val > max then return max end
     return val
 end
-
-local FONT_FLAG = "" 
-local padding_x = 8
-local padding_y = 4
-local anim_speed = 6 
-
-client.set_event_callback("paint", function()
-    local ft = globals.frametime()
-    local screen_w, screen_h = client.screen_size()
-    
-    local base_y = screen_h - 150 
-    
-    local stack_y_offset = 0
-
-    for i, notif in ipairs(notifications) do
-        local is_active = globals.realtime() < notif.active_until
-
-        if is_active then
-            notif.progress = clamp(notif.progress + ft * anim_speed, 0, 1)
-        else
-            notif.progress = clamp(notif.progress - ft * anim_speed, 0, 1)
-        end
-        
-        if notif.progress <= 0 then
-            goto continue
-        end
-        
-        local text_w, text_h = renderer.measure_text(FONT_FLAG, notif.text)
-        local notify_w = text_w + (padding_x * 2)
-        local notify_h = text_h + padding_y
-
-        local alpha = math.floor(notif.progress * 255)
-        local slide_offset = (1 - notif.progress) * slide_distance 
-
-        local x = (screen_w / 2) - (notify_w / 2)
-        
-        local y = base_y - stack_y_offset + slide_offset
-        
-        local bg_alpha = math.floor(200 * notif.progress)
-        renderer.rectangle(x, y, notify_w, notify_h, 16, 16, 16, bg_alpha)
-        renderer.rectangle(x, y, notify_w, 2, 150, 200, 60, alpha)
-        renderer.text(x + padding_x, y + (padding_y / 2), 255, 255, 255, alpha, FONT_FLAG, 0, notif.text)
-
-        stack_y_offset = stack_y_offset + notify_h + stack_spacing
-        
-        ::continue::
-    end
-
-    for i = #notifications, 1, -1 do
-        if notifications[i].progress <= 0 then
-            table.remove(notifications, i)
-        end
-    end
-end)
 
 local counter_notif = 1
 
@@ -226,6 +146,10 @@ local mva_select = groups.fakelag:slider("\n\n\n", 1, 3, 1, true, "", 1, {"Misce
 mva_select:depend({okoshko, "Misc & Visuals"})
 local fast_ladder = groups.angles:checkbox("\v • \rFast ladder")
 fast_ladder:depend({okoshko, "Misc & Visuals"}, {mva_select, 1})
+local thirdperisonio = groups.angles:checkbox("\v • \rThird person")
+thirdperisonio:depend({okoshko, "Misc & Visuals"}, {mva_select, 2})
+local third_dist333 = groups.angles:slider("\n", 20, 250, 20, true, "")
+third_dist333:depend({okoshko, "Misc & Visuals"}, {mva_select, 2}):depend(thirdperisonio)
 local aspect_r = groups.angles:checkbox("\v • \rAspect ratio")
 aspect_r:depend({okoshko, "Misc & Visuals"}, {mva_select, 2})
 local aspect_slider = groups.angles:slider("\n\n", 100, 200, 100, true, "%")
@@ -240,6 +164,10 @@ local logs = groups.other:checkbox("\v • \rAimbot Logs")
 logs:depend({okoshko, "Misc & Visuals"}, {mva_select, 1})
 local log_variance = groups.other:multiselect("Log variance", "Screen", "Console")
 log_variance:depend({okoshko, "Misc & Visuals"}, {mva_select, 1}):depend(logs)
+local log_duration = groups.other:slider("\vDuration", 1, 10, 1, true, "s")
+log_duration:depend({okoshko, "Misc & Visuals"}, {mva_select, 1}, {log_variance, "Screen"}):depend(logs)
+local log_anim_dur = groups.other:slider("\vAnimation speed", 1, 10, 1, true, "s")
+log_anim_dur:depend({okoshko, "Misc & Visuals"}, {mva_select, 1}, {log_variance, "Screen"}):depend(logs)
 local anims = groups.angles:checkbox("\v • \rAnimBreakers")
 anims:depend({okoshko, "Misc & Visuals"}, {mva_select, 1})
 local anim_ground = groups.angles:combobox("Ground", "None", "Jitter", "Walking", "Static")
@@ -355,6 +283,72 @@ end
 
 client.delay_call(0.5, send_launch_request)
 
+utils.normalize_yaw = function(yaw)
+    return (yaw + 180) % 360 - 180
+end
+
+utils.lerp = function(start, end_pos, time, ampl)
+    if start == end_pos then return end_pos end
+    ampl = ampl or math.min(40, 1/globals.frametime())
+    local frametime = globals.frametime() * ampl
+    time = time * frametime
+    local val = start + (end_pos - start) * time
+    if(math.abs(val - end_pos) < 0.01) then return end_pos end
+    return val 
+end
+
+utils.clamp = function(number, min, max)
+	if number < min then
+		return min
+	elseif number > max then
+		return max    
+	end
+	return number
+end
+
+antiaims.maxdelta = function(e)
+    local anm = c_entity.new(e):get_anim_state()
+    local duckamount = anm.duck_amount
+    local speedfraction = math.max(0, math.min(anm.feet_speed_forwards_or_sideways, 1))
+    local speedfactor = math.max(0, math.min(1, anm.feet_speed_unknown_forwards_or_sideways))
+    local st1 = ((anm.stop_to_full_running_fraction * -0.30000001) - 0.19999999) * speedfraction + 1.0
+    if duckamount > 0 then
+        st1 = st1 + ((duckamount * speedfactor)*(0.5 - st1))
+    end
+    des = anm.max_yaw * st1
+    return utils.clamp(des, 0, 58)
+end
+
+antiaims.jitter2 = function(cmd, base, tick)
+    local lplayer = entity.get_local_player()
+    local my_weapon = entity.get_player_weapon(lplayer)
+    local simtime = entity.get_prop(lplayer, "m_flSimulationTime")
+    local curtime = globals.curtime()
+    local yaw = entity.get_prop(lplayer, "m_angEyeAngles[1]")
+    local can_shoot = false
+    local nading = false
+    if my_weapon ~= nil then
+        local weapon = csgo_weapons(my_weapon)
+        if weapon.is_revolver then
+            can_shoot = curtime > entity.get_prop(my_weapon, "m_flNextPrimaryAttack")
+        elseif weapon.is_melee_weapon then
+            can_shoot = curtime > math.max(entity.get_prop(lplayer, "m_flNextAttack"), entity.get_prop(my_weapon, "m_flNextPrimaryAttack"), entity.get_prop(my_weapon, "m_flNextSecondaryAttack")) - globals.tickinterval()
+        elseif weapon.is_grenade then
+            can_shoot = false
+        else
+            can_shoot = curtime > math.max(entity.get_prop(lplayer, "m_flNextAttack"), entity.get_prop(my_weapon, "m_flNextPrimaryAttack"), entity.get_prop(my_weapon, "m_flNextSecondaryAttack"))
+        end
+        if weapon.is_grenade and entity.get_prop(my_weapon, "m_fThrowTime") > 0 then nading = true end
+    end
+    if cmd.in_attack == 1 and can_shoot or nading then return end
+    if cmd.chokedcommands == 0 then
+        local side = antiaims.maxdelta(lplayer) + base
+        antiaims.v2swap = utils.cmd_ticks()%(tick*2) >= tick and -1 or 1
+        cmd.yaw = utils.normalize_yaw(yaw + (side * antiaims.v2swap))
+        cmd.allow_send_packet = false
+    end
+end
+
 local builder = {}
 local steps = {"2 step", "3 step", "4 step", "5 step", "6 step", "7 step", "8 step", "9 step", "10 step", "11 step", "12 step"}
 
@@ -381,68 +375,83 @@ probel:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selecti
 ctx.one_way = groups.angles:slider("\n", -180, 180, 0, true)
 ctx.one_way:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\aFFFF00331 - Way"}, ctx.enable)
 
-ctx.left_angle = groups.angles:slider("\n", -90, 90, 0, true, "º")
+ctx.enbl_rand_l = groups.angles:checkbox("\n")
+ctx.enbl_rand_l:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
+
+ctx.left_angle = groups.angles:slider("\a373737FFLeft", -120, 120, 0, true, "º")
 ctx.left_angle:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
 
 ctx.random_left = groups.angles:slider("\n", 0, 100, 0, true, "%")
-ctx.random_left:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
+ctx.random_left:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, ctx.enbl_rand_l)
 
 probel_four = groups.angles:label("\a373737FF                 ")
 probel_four:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
 
-ctx.right_angle = groups.angles:slider("\n", -90, 90, 0, true, "º")
+ctx.enbl_rand_r = groups.angles:checkbox("\n")
+ctx.enbl_rand_r:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
+
+ctx.right_angle = groups.angles:slider("\a373737FFRight", -120, 120, 0, true, "º")
 ctx.right_angle:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
 
 ctx.random_right = groups.angles:slider("\n", 0, 100, 0, true, "%")
-ctx.random_right:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
+ctx.random_right:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, ctx.enbl_rand_r)
 
 probel_six = groups.angles:label("\a373737FF                 ")
 probel_six:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
 
-ctx.modes_jitter = groups.angles:combobox('\n', {"Off", "Random"})
-ctx.modes_jitter:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
+labeliconka = groups.angles:label("                             \v")
+labeliconka:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
 
-ctx.modes_jitter_slid = groups.angles:slider('\n', -180, 180, 0, true)
-ctx.modes_jitter_slid:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, {ctx.modes_jitter, "Random"})
+probel_six = groups.angles:label("\a373737FF                 ")
+probel_six:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
 
-ctx.modes_jitter_slid2 = groups.angles:slider('\n', -180, 180, 0, true)
-ctx.modes_jitter_slid2:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, {ctx.modes_jitter, "Random"})
+ctx.pick_mode = groups.angles:combobox("\n", {"Off", "Custom", "Guard"})
+ctx.pick_mode:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
 
-probel_five = groups.angles:label("\a373737FF                 ")
-probel_five:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
+ctx.custom_dec = groups.angles:combobox("\n", {"Jitter", "Static"})
+ctx.custom_dec:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, {ctx.pick_mode, "Custom"})
+
+ctx.static_dec = groups.angles:combobox("\n", {"+", "-", "m"})
+ctx.static_dec:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, {ctx.pick_mode, "Custom"}, {ctx.custom_dec, "Static"})
+
+ctx.static_dec_m = groups.angles:slider("\n", -180, 180, 0, true, "")
+ctx.static_dec_m:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, {ctx.pick_mode, "Custom"}, {ctx.custom_dec, "Static"}, {ctx.static_dec, "m"})
+
+ctx.jitter_dec = groups.angles:slider("\n", -180, 180, 0, true, "")
+ctx.jitter_dec:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, {ctx.pick_mode, "Custom"}, {ctx.custom_dec, "Jitter"})
+
+probel_six = groups.angles:label("\a373737FF                 ")
+probel_six:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
 
 ctx.delay_mode = groups.angles:slider("\n", 1, 3, 1, true, "", 1, {"Default", "Randomize", "Step"})
-ctx.delay_mode:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}) 
+ctx.delay_mode:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.pick_mode, "Guard"}) 
 
 probel_five = groups.angles:label("\a373737FF                 ")
-probel_five:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
+probel_five:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, {ctx.pick_mode, "Guard"})
 
-ctx.delay_mode_tickes = groups.angles:slider("\n", 1, 2, 1, true, "", 1, {"Default", "Time"})
-ctx.delay_mode_tickes:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}) 
+ctx.delay_check = groups.angles:checkbox("\a373737FFAdd")
+ctx.delay_check:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.pick_mode, "Guard"})
 
-ctx.delay_check = groups.angles:checkbox("\n")
-ctx.delay_check:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode_tickes, 2}) 
+probel_five = groups.angles:label("\a373737FF                 ")
+probel_five:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, {ctx.pick_mode, "Guard"})
 
 ctx.step_slider = groups.angles:slider("\n", 1, 11, 1, true, "", 1, step_names)
-ctx.step_slider:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode, 3})
+ctx.step_slider:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode, 3}, {ctx.pick_mode, "Guard"})
 
 ctx.delay_time = groups.angles:slider("\n", 1, 24, 1, true, "t", 1, {"Off"})
-ctx.delay_time:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode, 1})
+ctx.delay_time:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode, 1}, {ctx.pick_mode, "Guard"})
 
 ctx.delay_1 = groups.angles:slider("\n", 1, 24, 1, true, "t", 1, {"Off"})
-ctx.delay_1:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode, 2})
+ctx.delay_1:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode, 2}, {ctx.pick_mode, "Guard"})
 
 ctx.delay_2 = groups.angles:slider("\n", 1, 24, 1, true, "t", 1, {"Off"})
-ctx.delay_2:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, ctx.enable, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode, 2})
-
-probel_five = groups.angles:label("\a373737FF                 ")
-probel_five:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable)
+ctx.delay_2:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, ctx.enable, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode, 2}, {ctx.pick_mode, "Guard"})
 
 line_prob = groups.angles:label("\a373737FF‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾")
-line_prob:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, {ctx.delay_mode_tickes, 2, 3})
+line_prob:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.enable, ctx.delay_check, {ctx.pick_mode, "Guard"})
 
 ctx.delay_time_modes = groups.angles:slider("\n", 10, 1500, 10, true, "ms")
-ctx.delay_time_modes:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, ctx.enable, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, {ctx.delay_mode_tickes, 2}, ctx.delay_check)
+ctx.delay_time_modes:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, ctx.enable, {selection, 1}, {ctx.enable_lr, "\a00FF00332 - Way"}, ctx.delay_check, {ctx.pick_mode, "Guard"})
 
 ctx.combo1 = groups.angles:combobox("\n", {"Off", "Center", "Offset", "Random", "Skitter"})
 ctx.combo1:depend({state_selector, state}, {okoshko, "Anti-aimbot angles"}, {selection, 1}, ctx.enable, {ctx.enable_lr, "\aFFFF00331 - Way"})
@@ -489,6 +498,26 @@ ctx.random_slider:depend({okoshko, "Anti-aimbot angles"}, {defensive_selector, s
 ctx.random_slider2 = groups.angles:slider("\n", -89, 89, 0, true, "")
 ctx.random_slider2:depend({okoshko, "Anti-aimbot angles"}, {defensive_selector, state}, {selection, 2}, ctx.enable_defensive, {ctx.pitch_defensive, "Random"})
 
+local function visib()
+    modech = ctx.delay_mode:get()
+    hidemain = ctx.delay_time 
+    hidemain1 = ctx.delay_1
+    hidemain2 = ctx.delay_2
+
+    if ctx.delay_check:get() == true then
+        hidemain:set_visible(false)
+        hidemain1:set_visible(false)
+        hidemain2:set_visible(false)
+    elseif modech == 1 then
+        hidemain:set_visible(true)
+    elseif modech == 2 then
+    hidemain1:set_visible(true)
+    hidemain2:set_visible(true)
+    end
+end
+
+ctx.delay_check:set_callback(visib)
+    
 builder [state] = ctx
 end
 
@@ -530,9 +559,6 @@ end
 local sended = 0
 local switch = false
 local last_time_switch = 0
-local sended_left  = 0
-local sended_right = 0
-local use_left = true
 
 local function warmup_antiaim()
    gamerulesproxy = entity.get_all('CCSGameRulesProxy')[1]
@@ -550,15 +576,22 @@ local function warmup_antiaim()
 end
 
 local function builder_aa(cmd)
-    state = get_local_state()
-    me = entity.get_local_player()
-    gamerulesproxy = entity.get_all('CCSGameRulesProxy')[1]
-    warmup = entity.get_prop(gamerulesproxy,'m_bWarmupPeriod')
+    local state = get_local_state()
+    local me = entity.get_local_player()
+    if not me or not entity.is_alive(me) then return end
 
-    local ctx = builder[builder[state].enable:get() and state or "Shared"]
+    local gamerulesproxy = entity.get_all('CCSGameRulesProxy')[1]
+    local warmup = entity.get_prop(gamerulesproxy, 'm_bWarmupPeriod')
 
     if warmups:get("Warmup") and shizo_aa:get() then return end
-    if not ctx.enable:get() then return end
+
+    local ctx = builder[builder[state].enable:get() and state or "Shared"]
+    --if not ctx.enable:get() then return end
+
+    if not ctx.enable:get() then 
+    refs.aa.angles.yaw[1]:override("180")
+    refs.aa.angles.yaw[2]:override("0")
+end
 
     refs.aa.angles.pitch[1]:override("Custom")
     refs.aa.angles.pitch[2]:override(89)
@@ -567,73 +600,88 @@ local function builder_aa(cmd)
     refs.aa.angles.base:override("At targets")
     refs.aa.angles.enable:override(true)
 
-    jit_value  = ctx.modes_jitter_slid:get()
-    jit_value2 = ctx.modes_jitter_slid2:get()
+    local delay_check_ch = ctx.delay_check:get() 
+    local delay_mode = ctx.delay_mode:get() 
+    local modemain_m = ctx.pick_mode:get()
+    local modestatic = ctx.static_dec:get()
+    local modestatic_m = ctx.static_dec_m:get()
 
-    current_delay = ctx.delay_time:get()
-    mode = ctx.delay_mode:get()
+    local current_delay = 0
+    local switch_now = false
 
-    if mode == 2 then
-        min_delay = ctx.delay_1:get()
-        max_delay = ctx.delay_2:get()
-        current_delay = math.random(min_delay, max_delay + min_delay)
-    end
+    if delay_check_ch then
+        local time_ms = ctx.delay_time_modes:get() 
+        local interval = time_ms / 1000 
 
-    local delay_mode_tickes = ctx.delay_mode_tickes:get()
-
-    if globals.chokedcommands() == 0 then
-            sended = sended + 1
-            if sended % current_delay == 0 then
-                if delay_mode_tickes == 2 then
-                    local time_ms  = ctx.delay_time_modes:get()
-                    local time_sec = time_ms / 1000
-                    local now = globals.curtime()
-                    if now - last_time_switch >= time_sec then
-                        switch = not switch
-                        last_time_switch = now
-                    end
-                else
-                    switch = not switch
-                end
+        if interval > 0 then
+            local now = globals.curtime()
+            if now - (last_time_switch or 0) >= interval then
+                switch = not switch
+                last_time_switch = now
             end
         end
-    left_value       = ctx.left_angle:get()
-    right_value      = ctx.right_angle:get()
-    random_left_pct  = ctx.random_left:get()
-    random_right_pct = ctx.random_right:get()
 
-    left_variation  = left_value  * (random_left_pct  / 100)
-    right_variation = right_value * (random_right_pct / 100)
-    randomized_left  = left_value  + math.random(-left_variation,  left_variation)
-    randomized_right = right_value + math.random(-right_variation, right_variation)
+    else
 
-        main_offset = switch and randomized_left or randomized_right
+        if globals.chokedcommands() == 0 then
+            sended = sended + 1
 
-    refs.aa.angles.yaw[2]:override(main_offset)
-    refs.aa.angles.body[1]:override("Static")
-    refs.aa.angles.body[2]:override(switch and 120 or -120)
-end
+            if delay_mode == 1 then
+                current_delay = ctx.delay_time:get()
+            elseif delay_mode == 2 then 
+                local min_d = ctx.delay_1:get()
+                local max_d = ctx.delay_2:get()
+                current_delay = math.random(min_d, max_d)
+            end
 
-
-
-local function cust_random()
-    state = get_local_state()
-    me = entity.get_local_player()
-    gamerulesproxy = entity.get_all('CCSGameRulesProxy')[1]
-    warmup = entity.get_prop(gamerulesproxy,'m_bWarmupPeriod')
-
-    local ctx = builder[builder[state].enable:get() and state or "Shared"]
-
-    if warmups:get("Warmup") and shizo_aa:get() and not ctx.enable:get() then return end
-
-    min_jit = math.min(ctx.modes_jitter_slid:get(), ctx.modes_jitter_slid2:get())
-    max_jit = math.max(ctx.modes_jitter_slid:get(), ctx.modes_jitter_slid2:get())
-    random_jitter = math.random(min_jit, max_jit)
-
-    if ctx.modes_jitter:get("Random") then
-        refs.aa.angles.yaw[2]:override(random_jitter)
+            if current_delay > 0 and sended % current_delay == 0 then
+                switch = not switch
+            end
         end
     end
+
+    if modestatic == "+" then
+    refs.aa.angles.body[1]:override("Static")
+    refs.aa.angles.body[2]:override(-1)
+end
+
+    if modestatic == "-" then
+    refs.aa.angles.body[1]:override("Static")
+    refs.aa.angles.body[2]:override(1)
+end
+
+    if modemain_m == "Off" then
+    refs.aa.angles.body[1]:override("Off")
+end
+
+    if modestatic == "m" then
+    refs.aa.angles.body[1]:override("Static")
+    refs.aa.angles.body[2]:override(modestatic_m)
+end
+
+    local left_value = ctx.left_angle:get()
+    local right_value = ctx.right_angle:get()
+    local random_left_pct = ctx.random_left:get()
+    local random_right_pct = ctx.random_right:get()
+
+    local left_variation = left_value  * (random_left_pct  / 100)
+    local right_variation = right_value * (random_right_pct / 100)
+
+    local randomized_left = left_value  + math.random(-left_variation,  left_variation)
+    local randomized_right = right_value + math.random(-right_variation, right_variation)
+
+    if ctx.enbl_rand_l:get() and ctx.enbl_rand_r:get() then
+        main_offset = switch and randomized_left or randomized_right
+    else
+        main_offset = switch and left_value or right_value
+    end
+
+    refs.aa.angles.yaw[2]:override(main_offset)
+    if modemain_m == "Guard" then
+    refs.aa.angles.body[1]:override("Static")
+    refs.aa.angles.body[2]:override(switch and 120 or -120)
+    end
+end
 
     local function safe_knife()
         local me = entity.get_local_player()
@@ -715,6 +763,17 @@ local function anti_stab()
     end
 end
 
+local original_dist = tonumber(client.get_cvar("cam_idealdist"))
+
+client.set_event_callback("setup_command", function()
+    if thirdperisonio:get() then
+        cvar.c_mindistance:set_int(third_dist333:get())
+        cvar.c_maxdistance:set_int(third_dist333:get())
+    else
+        cvar.c_mindistance:set_int(original_dist)
+        cvar.c_maxdistance:set_int(original_dist)
+    end
+end)
 local function one_way_antiaim()
     state = get_local_state()
     local ctx = builder[builder[state].enable:get() and state or "Shared"]
@@ -745,6 +804,73 @@ client.set_event_callback('round_end', function()
         end
     end)
 end
+
+local function push_notification(format_string, ...)
+    local formatted_text
+    
+    if select('#', ...) > 0 then
+        formatted_text = string.format(format_string, ...)
+    else
+        formatted_text = format_string
+    end
+
+    local new_log = {
+        text = formatted_text,
+        active_until = globals.realtime() + log_duration:get(),
+        progress = 0.0,
+    }
+
+    table.insert(notifications, 1, new_log)
+end
+
+client.set_event_callback("paint", function()
+    local ft = globals.frametime()
+    local screen_w, screen_h = client.screen_size()
+    
+    local base_y = screen_h - 150 
+    
+    local stack_y_offset = 0
+
+    for i, notif in ipairs(notifications) do
+        local is_active = globals.realtime() < notif.active_until
+
+        if is_active then
+            notif.progress = clamp(notif.progress + ft * log_anim_dur:get(), 0, 1)
+        else
+            notif.progress = clamp(notif.progress - ft * log_anim_dur:get(), 0, 1)
+        end
+        
+        if notif.progress <= 0 then
+            goto continue
+        end
+        
+        local text_w, text_h = renderer.measure_text("", notif.text)
+        local notify_w = text_w + (8 * 2)
+        local notify_h = text_h + 4
+
+        local alpha = math.floor(notif.progress * 255)
+        local slide_offset = (1 - notif.progress) * 50
+
+        local x = (screen_w / 2) - (notify_w / 2)
+        
+        local y = base_y - stack_y_offset + slide_offset
+        
+        local bg_alpha = math.floor(200 * notif.progress)
+        renderer.rectangle(x, y, notify_w, notify_h, 16, 16, 16, bg_alpha)
+        renderer.rectangle(x, y, notify_w, 2, 150, 200, 60, alpha)
+        renderer.text(x + 8, y + (4 / 2), 255, 255, 255, alpha, "", 0, notif.text)
+
+        stack_y_offset = stack_y_offset + notify_h + 7
+        
+        ::continue::
+    end
+
+    for i = #notifications, 1, -1 do
+        if notifications[i].progress <= 0 then
+            table.remove(notifications, i)
+        end
+    end
+end)
 
 local aspect_ratio_handler do
 local function set_aspect_ratio(aspect_ratio_multiplier)
@@ -1606,7 +1732,7 @@ end
 delete:set_callback(delete_button_func)
 
 --@defensive
-last_commandnumber = 0
+--[[ last_commandnumber = 0
 static = {
     tickbase_max = 0, 
     diff = 0,         
@@ -1644,79 +1770,79 @@ player.run_command = function(cmd)
         player.shifting = shift
         player._shifting_enough = shift <= wanted
     end
-end
+end ]]
 
-function update_defensive(cmd)
-	local me = entity.get_local_player()
-	local valid_entity = me and entity.is_alive(me)
-	if not valid_entity then return end
-    local can_exploit = refs.aa.aimbot.dt[1]:get() or refs.aa.other.hs:get() and not refs.aa.aimbot.fake_duck:get() and player.get_dt()
-    if not can_exploit then static.defensive = false end
-	local tickbase = entity.get_prop(me, "m_nTickBase") or 0
-	if last_commandnumber == cmd.command_number then
-		static.diff = tickbase - static.tickbase_max
-		static.defensive = static.diff < -3
-		if math.abs(static.diff) > 64 then
-			static.tickbase_max = 0
-		end
-		static.tickbase_max = math.max(tickbase, static.tickbase_max or 0)
-	end
-	return static.defensive
-end
+-- function update_defensive(cmd)
+-- 	local me = entity.get_local_player()
+-- 	local valid_entity = me and entity.is_alive(me)
+-- 	if not valid_entity then return end
+--     local can_exploit = refs.aa.aimbot.dt[1]:get() or refs.aa.other.hs:get() and not refs.aa.aimbot.fake_duck:get() and player.get_dt()
+--     if not can_exploit then static.defensive = false end
+-- 	local tickbase = entity.get_prop(me, "m_nTickBase") or 0
+-- 	if last_commandnumber == cmd.command_number then
+-- 		static.diff = tickbase - static.tickbase_max
+-- 		static.defensive = static.diff < -3
+-- 		if math.abs(static.diff) > 64 then
+-- 			static.tickbase_max = 0
+-- 		end
+-- 		static.tickbase_max = math.max(tickbase, static.tickbase_max or 0)
+-- 	end
+-- 	return static.defensive
+-- end
 
-function on_finish_command(cmd)
-    local lp = entity.get_local_player()
-	local valid_entity = lp and entity.is_alive(lp)
-	if valid_entity then
-        last_commandnumber = cmd.command_number
-    end
-end
+-- function on_finish_command(cmd)
+--     local lp = entity.get_local_player()
+-- 	local valid_entity = lp and entity.is_alive(lp)
+-- 	if valid_entity then
+--         last_commandnumber = cmd.command_number
+--     end
+-- end
 
-local state = get_local_state()
+-- local state = get_local_state()
 
-local is_lcshka_slomana = static.defensive
+-- local is_lcshka_slomana = static.defensive
 
-client.set_event_callback("setup_command", function(cmd)
-    ctx = builder[builder[state].enable_defensive:get() and state or "Shared"]
-    pitch_mode = ctx.pitch_defensive:get()
-    state = get_local_state()
+-- client.set_event_callback("setup_command", function(cmd)
+--     ctx = builder[builder[state].enable_defensive:get() and state or "Shared"]
+--     pitch_mode = ctx.pitch_defensive:get()
+--     state = get_local_state()
 
-    if ctx.enable_defensive:get() then
-        refs.aa.angles.pitch[1]:override("Custom")
-        if pitch_mode == "Custom" then
-            refs.aa.angles.pitch[2]:override(ctx.custom_slider:get())
-        elseif pitch_mode == "Sway" then
-            local t = globals.curtime() * (ctx.sway_slider3:get() or 1)
-            local val1 = ctx.sway_slider1:get()
-            local val2 = ctx.sway_slider2:get()
-            local sway = val1 + (val2 - val1) * (0.5 + 0.5 * math.sin(t))
-            refs.aa.angles.pitch[2]:override(sway)
-        elseif pitch_mode == "Switch" then
-            local tick = globals.tickcount()
-            local switch_val = (tick % 5 < 2) and ctx.switch_slider:get() or ctx.switch_slider2:get()
-            refs.aa.angles.pitch[2]:override(switch_val)
-        elseif pitch_mode == "All angle" then
-            refs.aa.angles.pitch[2]:override(math.random(-89, 89))
-        elseif pitch_mode == "Random" then
-            refs.aa.angles.pitch[2]:override(math.random(ctx.random_slider:get(), ctx.random_slider2:get()))
-        elseif pitch_mode == "Random switch" then
-            local tick = globals.tickcount()
-            local val = (tick % 20 < 10) and ctx.random_slider:get() or ctx.random_slider2:get()
-            refs.aa.angles.pitch[2]:override(val)
-        end
-    end
-end)
+--     if ctx.enable_defensive:get() then
+--         refs.aa.angles.pitch[1]:override("Custom")
+--         if pitch_mode == "Custom" then
+--             refs.aa.angles.pitch[2]:override(ctx.custom_slider:get())
+--         elseif pitch_mode == "Sway" then
+--             local t = globals.curtime() * (ctx.sway_slider3:get() or 1)
+--             local val1 = ctx.sway_slider1:get()
+--             local val2 = ctx.sway_slider2:get()
+--             local sway = val1 + (val2 - val1) * (0.5 + 0.5 * math.sin(t))
+--             refs.aa.angles.pitch[2]:override(sway)
+--         elseif pitch_mode == "Switch" then
+--             local tick = globals.tickcount()
+--             local switch_val = (tick % 5 < 2) and ctx.switch_slider:get() or ctx.switch_slider2:get()
+--             refs.aa.angles.pitch[2]:override(switch_val)
+--         elseif pitch_mode == "All angle" then
+--             refs.aa.angles.pitch[2]:override(math.random(-89, 89))
+--         elseif pitch_mode == "Random" then
+--             refs.aa.angles.pitch[2]:override(math.random(ctx.random_slider:get(), ctx.random_slider2:get()))
+--         elseif pitch_mode == "Random switch" then
+--             local tick = globals.tickcount()
+--             local val = (tick % 20 < 10) and ctx.random_slider:get() or ctx.random_slider2:get()
+--             refs.aa.angles.pitch[2]:override(val)
+--         end
+--     end
+-- end)
 
-client.set_event_callback("setup_command", function(cmd)
-if player.get_dt() and ctx.enable_defensive:get() then
-     cmd.force_defensive = true
-end
-end)
+-- client.set_event_callback("setup_command", function(cmd)
+-- if player.get_dt() and ctx.enable_defensive:get() then
+--      cmd.force_defensive = true
+-- end
+-- end)
 
-client.set_event_callback('predict_command', function(cmd)
-    update_defensive(cmd)
-end)
+-- client.set_event_callback('predict_command', function(cmd)
+--     update_defensive(cmd)
+-- end)
 
-client.set_event_callback("run_command", function(cmd)
-    player.run_command(cmd)
-end)
+-- client.set_event_callback("run_command", function(cmd)
+--     player.run_command(cmd)
+-- end)
